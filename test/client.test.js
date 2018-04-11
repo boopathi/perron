@@ -9,11 +9,12 @@ describe('ServiceClient', () => {
   let clientOptions
 
   const requestStub = sinon.stub()
-  const emptySuccessResponse = Promise.resolve({
+  const createEmptySuccessResponse = () => Promise.resolve({
     statusCode: 200,
     headers: {},
     body: '{}'
   })
+
   const {ServiceClient} = proxyquire('../dist/client', {
     './request': {
       request: requestStub,
@@ -27,7 +28,7 @@ describe('ServiceClient', () => {
       hostname: 'catwatch.opensource.zalan.do'
     }
     requestStub.reset()
-    requestStub.returns(emptySuccessResponse)
+    requestStub.returns(createEmptySuccessResponse())
   })
 
   it('should throw if the service is not provided', () => {
@@ -43,6 +44,18 @@ describe('ServiceClient', () => {
         requestStub.firstCall.args[0].headers.accept,
         'application/json'
       )
+    })
+  })
+
+  it('should skip response decoding when skipResponseDecoding is set to false', () => {
+    const client = new ServiceClient({
+      ...clientOptions,
+      responseDecoder(_, response) {
+        return response;
+      }
+    });
+    return client.request().then(response => {
+      assert.strictEqual(typeof response.body, "string")
     })
   })
 
@@ -266,6 +279,7 @@ describe('ServiceClient', () => {
     })
     const errorResponse = Promise.resolve(Promise.reject(new Error('timeout')))
     const requests = Array.from({length: 11});
+    const emptySuccessResponse = createEmptySuccessResponse();
 
     [emptySuccessResponse, emptySuccessResponse, httpErrorResponse, emptySuccessResponse, errorResponse, errorResponse,
       httpErrorResponse, emptySuccessResponse, httpErrorResponse, errorResponse, emptySuccessResponse
@@ -427,6 +441,7 @@ describe('ServiceClient', () => {
     }
     const errorResponse = Promise.resolve(Promise.reject(new Error('timeout')))
     const requests = Array.from({length: 11});
+    const emptySuccessResponse = createEmptySuccessResponse();
 
     [emptySuccessResponse, emptySuccessResponse, errorResponse, emptySuccessResponse, httpErrorResponse, errorResponse,
       httpErrorResponse, emptySuccessResponse, errorResponse, httpErrorResponse, emptySuccessResponse

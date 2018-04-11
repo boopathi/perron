@@ -36,6 +36,16 @@ export interface ServiceClientRequestFilter {
 }
 
 /**
+ * Response Decoder
+ *
+ * A function to decode the response, and mutate the response.body to the
+ * decoded representation
+ */
+export interface ServiceClientResponseDecoder {
+  (client: ServiceClient, response: ServiceClientResponse): ServiceClientResponse
+}
+
+/**
  * This interface describes all the options that may be passed to the service client at construction time.
  */
 export class ServiceClientOptions {
@@ -67,6 +77,13 @@ export class ServiceClientOptions {
   }
   circuitBreaker?: (false | CircuitBreaker.Options | CircuitBreakerFactory)
   defaultRequestOptions?: Partial<ServiceClientRequestOptions>
+
+  /**
+   * Custom Response Decoder
+   *
+   * If NOT provided, the default decoder (JSON.parse when type is application/json) is used
+   */
+  responseDecoder?: ServiceClientResponseDecoder
 }
 
 /**
@@ -86,6 +103,7 @@ class ServiceClientStrictOptions {
     onRetry: (currentAttempt?: number, err?: Error, req?: ServiceClientRequestOptions) => void
   }
   defaultRequestOptions: ServiceClientRequestOptions
+  responseDecoder: ServiceClientResponseDecoder
 
   constructor (options: ServiceClientOptions) {
     if (!options.hostname) {
@@ -110,6 +128,8 @@ class ServiceClientStrictOptions {
     if ((this.retryOptions.minTimeout || 0) > (this.retryOptions.maxTimeout || 0)) {
       throw new TypeError('The `maxTimeout` must be equal to or greater than the `minTimeout`')
     }
+
+    this.responseDecoder = options.responseDecoder || decodeResponse;
 
     this.defaultRequestOptions = Object.assign({
       protocol: 'https:',
@@ -170,7 +190,13 @@ const unwindResponseFilters = (promise: Promise<ServiceClientResponse>, filter: 
 /**
  * Actually performs the request and applies the available filters in their respective phases.
  */
-const requestWithFilters = (client: ServiceClient, params: ServiceClientRequestOptions, filters: ServiceClientRequestFilter[]): Promise<ServiceClientResponse> => {
+const requestWithFilters = (
+  client: ServiceClient,
+  params: ServiceClientRequestOptions,
+  filters: ServiceClientRequestFilter[],
+  responseDecoder: ServiceClientResponseDecoder
+): Promise<ServiceClientResponse> => {
+
   const pendingResponseFilters: ServiceClientRequestFilter[] = []
 
   const requestFilterPromise = filters.reduce((promise: Promise<ServiceClientResponse | ServiceClientRequestOptions>, filter) => {
@@ -196,7 +222,7 @@ const requestWithFilters = (client: ServiceClient, params: ServiceClientRequestO
     .then(
       (rawResponse) => {
         response = rawResponse
-        return decodeResponse(client, rawResponse)
+        return responseDecoder(client, rawResponse)
       },
       (err) => wrapFailedError(client, ServiceClient.REQUEST_FAILED, err, responseThunk)
     )
@@ -318,7 +344,7 @@ export class ServiceClient {
 
     return new Promise<ServiceClientResponse>((resolve, reject) => operation.attempt((currentAttempt: number) => {
       breaker.run((success: () => void, failure: () => void) => {
-        return requestWithFilters(client, params, this.options.filters || [])
+        return requestWithFilters(client, params, this.options.filters || [], this.options.responseDecoder)
           .then((result: ServiceClientResponse) => {
             success()
             resolve(result)
